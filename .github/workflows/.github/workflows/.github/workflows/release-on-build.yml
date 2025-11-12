@@ -1,0 +1,53 @@
+name: Auto Release XpressBuy247 Plugins
+
+on:
+  workflow_run:
+    workflows: ["Build & Validate XpressBuy247 Plugins"]
+    types:
+      - completed
+
+jobs:
+  release:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: xpressbuy247-validated-plugins
+          path: build-artifacts
+
+      - name: Extract Version Tag
+        id: version
+        run: |
+          # If tag already exists, increment
+          latest_tag=$(git tag --sort=-v:refname | head -n 1)
+          if [ -z "$latest_tag" ]; then
+            echo "tag=v1.0.0" >> $GITHUB_OUTPUT
+          else
+            ver_num=$(echo $latest_tag | sed 's/v//')
+            IFS='.' read -r major minor patch <<< "$ver_num"
+            patch=$((patch + 1))
+            echo "tag=v${major}.${minor}.${patch}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "XpressBuy247 Plugin Suite ${{ steps.version.outputs.tag }}"
+          body: |
+            🧩 Automated build for XpressBuy247 plugin suite.
+
+            ✅ Validation passed  
+            📦 Plugins included:
+            - Core Framework Pro  
+            - Guardian Suite Pro  
+            - Smart Sandbox Installer Pro  
+            - MU Watchdog Pro  
+
+            🚀 Built automatically by GitHub Actions.
+          files: build-artifacts/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
