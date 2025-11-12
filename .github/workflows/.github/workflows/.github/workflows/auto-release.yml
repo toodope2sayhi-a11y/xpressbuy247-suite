@@ -1,0 +1,89 @@
+name: Auto-Release XpressBuy247 Plugins
+
+on:
+  workflow_run:
+    workflows: ["Build & Validate XpressBuy247 Plugins"]
+    types: [completed]
+
+jobs:
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_CI_TOKEN }}
+
+      - name: Download latest validated ZIPs
+        uses: actions/download-artifact@v4
+        with:
+          name: xpressbuy247-validated-plugins
+          path: build-artifacts
+
+      - name: Skip if no ZIPs
+        run: |
+          shopt -s nullglob
+          files=(build-artifacts/*.zip)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No ZIPs to release. Exiting."
+            exit 78
+          fi
+
+      - name: Compute release tag (run-number)
+        id: tag
+        run: echo "tag=v${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+
+      - name: Skip if tag already exists
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GH_CI_TOKEN }}
+        run: |
+          if gh release view "${{ steps.tag.outputs.tag }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release
+        if: steps.check.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ secrets.GH_CI_TOKEN }}
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: "XpressBuy247 Suite – ${{ steps.tag.outputs.tag }}"
+          body: |
+            🧩 **Automated Plugin Release**
+            **Workflow:** ${{ github.workflow }}
+            **Run:** ${{ github.run_id }}
+            **Commit:** ${{ github.sha }}
+
+            ✅ Includes validated plugin ZIPs from Guardian pipeline.
+          draft: false
+          prerelease: false
+          files: build-artifacts/*.zip
+
+      - name: Post confirmation Issue
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GH_CI_TOKEN }}
+          script: |
+            const tag = `${{ steps.tag.outputs.tag }}`;
+            const title = `📦 Auto-Release Published — ${tag}`;
+            const url = `https://github.com/${{ github.repository }}/releases/tag/${tag}`;
+            const body = `Hello Joel,
+
+A verified build has been published automatically.
+
+**Tag:** ${tag}
+**URL:** ${url}
+
+All plugin ZIPs were validated and attached.
+— XpressBuy247 Guardian CI`;
+
+            await github.request('POST /repos/${{ github.repository }}/issues', {
+              title,
+              body
+            });
