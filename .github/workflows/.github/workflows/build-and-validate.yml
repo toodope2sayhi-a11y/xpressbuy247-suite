@@ -62,3 +62,30 @@ jobs:
         with:
           name: xpressbuy247-validated-plugins
           path: build-artifacts/*.zip
+
+      - name: Notify Build Status by Email
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GH_CI_TOKEN }}
+          script: |
+            const result = '${{ job.status }}';
+            const runUrl = `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
+            const subject = `🚦 XpressBuy247 Build ${result === 'success' ? 'Succeeded' : 'Failed'}`;
+            const body = `
+            Hello Joel,
+
+            The latest build for **XpressBuy247 Suite** has completed with status: **${result.toUpperCase()}**.
+
+            Repository: ${{ github.repository }}
+            Workflow: ${{ github.workflow }}
+            Run URL: ${runUrl}
+
+            Regards,
+            XpressBuy247 Guardian CI
+            `;
+
+            await github.request('POST /repos/${{ github.repository }}/issues', {
+              title: subject,
+              body: body
+            });
