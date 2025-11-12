@@ -1,0 +1,59 @@
+name: Build & Validate XpressBuy247 Plugins
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  validate:
+    name: Validate and Package Plugins
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, zip
+
+      - name: Lint and Validate Plugins
+        run: |
+          echo "🔍 Validating plugin files..."
+          for plugin in plugins-src/*; do
+            [ -d "$plugin" ] || continue
+            main_file="$plugin/$(basename "$plugin").php"
+            if [[ -f "$main_file" ]]; then
+              echo "✅ Checking $(basename "$plugin")..."
+              php -l "$main_file" || exit 1
+              grep -q "namespace" "$main_file" || { echo "❌ Missing namespace in $main_file"; exit 1; }
+              grep -q "defined('ABSPATH')" "$main_file" || { echo "❌ Missing ABSPATH guard in $main_file"; exit 1; }
+            else
+              echo "⚠️ Skipping $(basename "$plugin") — main file not found."
+            fi
+          done
+
+      - name: Package Plugins
+        run: |
+          mkdir -p build-artifacts
+          for plugin in plugins-src/*; do
+            [ -d "$plugin" ] || continue
+            plugin_slug=$(basename "$plugin")
+            main_file="$plugin/$plugin_slug.php"
+            if [[ -f "$main_file" ]]; then
+              version=$(grep -i "^Version:" "$main_file" | head -n 1 | cut -d':' -f2 | xargs)
+              zip_name="${plugin_slug}-v${version}.zip"
+              echo "📦 Zipping $plugin_slug ($version)..."
+              cd "$plugin"
+              zip -r "../../build-artifacts/$zip_name" . -x "*.git*" "*.md" "*tests/*" "*build/*" ".github/*"
+              cd - > /dev/null
+            fi
+          done
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: xpressbuy247-validated-plugins
+          path: build-artifacts/*.zip
