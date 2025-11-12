@@ -16,25 +16,40 @@ $plugins = [
     ['slug'=>'xpressbuy247-mu-watchdog-pro','name'=>'XpressBuy247 MU Watchdog Pro','namespace'=>'XpressBuy247\\WatchdogPro','version'=>'X.0.0.1'],
 ];
 
+/**
+ * Sanitize and reorder plugin main file
+ */
 function sanitize_main_file(string $file, string $namespace): array {
     $orig = file_get_contents($file);
     $c = $orig;
+
+    // Normalize line endings and remove BOM
+    $c = str_replace(["\r\n", "\r"], "\n", $c);
     $c = preg_replace('/^\xEF\xBB\xBF/', '', $c);
-    $c = preg_replace('/^\s*(?=<\?php)/', '', $c);
-    if (preg_match('/(<\?php)(.*?)(namespace\s+[A-Za-z0-9_\\\\]+;)/s', $c, $m)) {
-        if (!preg_match('/defined\s*\(\s*[\'\"]ABSPATH[\'\"]\s*\)\s*\|\|\s*exit\s*;/', $c)) {
-            $c = str_replace($m[3], "defined('ABSPATH') || exit;\n\n".$m[3], $c);
-        }
+
+    // --- AUTO-FIX: header / namespace order ---
+    if (preg_match('/(<\?php\s*)(\/\*\*[\s\S]*?\*\/)?\s*(declare\(strict_types=1;\))?/i', $c, $m)) {
+        $php = $m[1] ?? '<?php';
+        $header = $m[2] ?? '';
+        $declare = $m[3] ?? '';
+        $body = preg_replace('/^<\?php[\s\S]*/', '', $c);
+        $newHeader = $php . "\n" . $declare . "\n\nnamespace {$namespace};\n\ndefined('ABSPATH') || exit;\n\n" . $header . "\n";
+        $c = $newHeader . $body;
     }
-    $c = str_replace(["\r\n","\r"], "\n", $c);
+
     $changed = ($c !== $orig);
     if ($changed) file_put_contents($file, $c);
+
+    // Basic lint / namespace check
     $lint_ok = true;
     try { token_get_all($c); } catch (Throwable $e) { $lint_ok = false; }
     $ns_ok = (strpos($c, "namespace {$namespace};") !== false);
     return ['changed'=>$changed,'lint_ok'=>$lint_ok,'ns_ok'=>$ns_ok];
 }
 
+/**
+ * Zip a directory recursively
+ */
 function zip_dir(string $source, string $zipPath): bool {
     if (!extension_loaded('zip')) throw new RuntimeException('Zip extension not available');
     $zip = new ZipArchive();
@@ -53,9 +68,16 @@ function zip_dir(string $source, string $zipPath): bool {
     return $zip->close();
 }
 
+// ------------------------------------------------------------------
+
 $manifest = ['suite_version'=>'X.0.0.1','built_at'=>gmdate('c'),'plugins'=>[]];
+
 foreach ($plugins as $p) {
-    $slug = $p['slug']; $ns = $p['namespace']; $name = $p['name']; $ver = $p['version'];
+    $slug = $p['slug']; 
+    $ns = $p['namespace']; 
+    $name = $p['name']; 
+    $ver = $p['version'];
+
     $srcDir = "{$SRC}/{$slug}";
     $main   = "{$srcDir}/{$slug}.php";
     if (!is_file($main)) { echo "[FAIL] Missing main file: {$main}\n"; continue; }
@@ -67,23 +89,28 @@ foreach ($plugins as $p) {
     $ns_ok     = $san['ns_ok'];
     $lint_ok   = $san['lint_ok'];
 
-    $tmp = sys_get_temp_dir().'/xb247_'.uniqid()."/{$slug}";
-    @mkdir($tmp, 0777, true);
+    // Copy source into temp folder for zipping
+    $tmpRoot = sys_get_temp_dir().'/xb247_'.uniqid();
+    $tmpPlugin = "{$tmpRoot}/{$slug}";
+    @mkdir($tmpPlugin, 0777, true);
+
     $it = new RecursiveIteratorIterator(
         new RecursiveDirectoryIterator($srcDir, FilesystemIterator::SKIP_DOTS),
         RecursiveIteratorIterator::SELF_FIRST
     );
     foreach ($it as $f) {
-        $dest = $tmp . substr($f->getPathname(), strlen($srcDir));
+        $dest = $tmpPlugin . substr($f->getPathname(), strlen($srcDir));
         if ($f->isDir()) { @mkdir($dest, 0777, true); }
         else { @mkdir(dirname($dest), 0777, true); copy($f->getPathname(), $dest); }
     }
-    $zip = "{$BUILD}/{$slug}.zip";
-    $ok = zip_dir(dirname($tmp), $zip);
 
-    $rit = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(dirname($tmp), FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
+    $zip = "{$BUILD}/{$slug}.zip";
+    $ok = zip_dir($tmpRoot, $zip);
+
+    // Cleanup temp
+    $rit = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($tmpRoot, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
     foreach ($rit as $f) { $f->isDir() ? rmdir($f->getRealPath()) : unlink($f->getRealPath()); }
-    @rmdir(dirname($tmp));
+    @rmdir($tmpRoot);
 
     $result = ($header_ok && $guard_ok && $ns_ok && $lint_ok && $ok) ? 'PASS' : 'FAIL';
     $manifest['plugins'][] = [
