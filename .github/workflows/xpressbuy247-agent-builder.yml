@@ -1,72 +1,115 @@
-name: XpressBuy247 Agent Builder
+name: XpressBuy247 Enterprise Agent Builder • 2025 Edition
 
 on:
   workflow_dispatch:
     inputs:
       plugin_folder:
-        description: 'Plugin folder inside the repo (e.g. xpressbuy247-smart-sandbox-installer-pro)'
+        description: "Folder of the plugin (e.g., xpressbuy247-smart-sandbox-installer-pro)"
         required: true
       plugin_main_file:
-        description: 'Main plugin file path from repo root (e.g. xpressbuy247-smart-sandbox-installer-pro/xpressbuy247-smart-sandbox-installer-pro.php)'
+        description: "Main plugin file path"
         required: true
-      build_mode:
-        description: 'Build mode (dev, staging, enterprise)'
+      auto_increment:
+        description: "Auto-increment version? (yes/no)"
         required: false
-        default: 'enterprise'
-      version:
-        description: 'Version to use in ZIP filename (e.g. vA.0.0.7)'
-        required: false
-        default: 'dev'
+        default: "yes"
 
 jobs:
-  build-plugin:
+  build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 🧩 Checkout repository
+      - name: 🧩 Checkout Repo
         uses: actions/checkout@v4
 
-      - name: 🐘 Setup PHP
+      - name: 🐘 Setup PHP 8.2
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.2'
-          coverage: none
+          php-version: "8.2"
 
-      - name: ✅ PHP syntax check (lint) for all plugin files
+      - name: 🔍 Extract Version from Plugin Header
+        id: version
         run: |
-          PLUGIN_FOLDER="${{ github.event.inputs.plugin_folder }}"
-          find "$PLUGIN_FOLDER" -type f -name '*.php' -print0 | xargs -0 -n 1 php -l
+          MAIN="${{ github.event.inputs.plugin_main_file }}"
+          RAW_VERSION=$(grep -i "Version:" "$MAIN" | head -1 | sed -E 's/Version:\s*//I')
+          echo "Raw Version: $RAW_VERSION"
+          
+          if [ "${{ github.event.inputs.auto_increment }}" = "yes" ]; then
+            NEW_VERSION=$(php -r '
+              $v = trim("'"$RAW_VERSION"'");
+              if (preg_match("/vA\.(\d+)\.(\d+)\.(\d+)/", $v, $m)) {
+                  $m[3]++;
+                  echo "vA.$m[1].$m[2].$m[3]";
+              } else {
+                  echo $v;
+              }
+            ')
+          else
+            NEW_VERSION="$RAW_VERSION"
+          fi
 
-      - name: 🔍 Validate main plugin header
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+      - name: 🛡️ Guardian Validation — Namespace, ABSPATH, Header, BOM
         run: |
-          MAIN_FILE="${{ github.event.inputs.plugin_main_file }}"
-          if [ ! -f "$MAIN_FILE" ]; then
-            echo "Main plugin file not found: $MAIN_FILE" >&2
-            exit 1
-          fi
-          if ! grep -q "Plugin Name:" "$MAIN_FILE"; then
-            echo "Plugin header is missing 'Plugin Name:' in $MAIN_FILE" >&2
-            exit 1
-          fi
-          echo "Main plugin header looks OK in $MAIN_FILE"
+          FOLDER="${{ github.event.inputs.plugin_folder }}"
+          echo "Running Guardian validation..."
+          
+          find "$FOLDER" -type f -name '*.php' | while read file; do
+            if head -n 1 "$file" | grep -q "<?php"; then :; else
+              echo "❌ ERROR: File missing opening <?php: $file"; exit 1;
+            fi
+            if grep -q $'\xEF\xBB\xBF' "$file"; then
+              echo "❌ ERROR: BOM detected in $file"; exit 1;
+            fi
+            if ! grep -q "defined('ABSPATH')" "$file"; then
+              echo "❌ ERROR: ABSPATH check missing: $file"; exit 1;
+            fi
+          done
 
-      - name: 📁 Prepare build directory
+      - name: 🧠 PSR-4 Namespace Validation
+        run: |
+          FOLDER="${{ github.event.inputs.plugin_folder }}"
+          echo "Scanning namespaces..."
+          find "$FOLDER" -type f -name '*.php' | while read file; do
+            if ! grep -q "^namespace " "$file"; then
+              echo "❌ ERROR: Missing namespace in $file"; exit 1;
+            fi
+          done
+
+      - name: 🧪 Sandbox Activation Test (WP-CLI)
+        run: |
+          echo "Setting up WordPress Sandbox..."
+          wp core download --allow-root
+          wp config create --dbname=wp --dbuser=root --dbpass=root --dbhost=localhost --allow-root
+          wp db create --allow-root
+
+          cp -R "${{ github.event.inputs.plugin_folder }}" wp-content/plugins/
+          wp plugin activate "${{ github.event.inputs.plugin_folder }}" --allow-root || {
+            echo "❌ ERROR: Plugin failed to activate"; exit 1;
+          }
+          echo "Sandbox Activation: ✔️ Success"
+
+      - name: 📦 Build ZIP
         run: |
           mkdir -p build
-          PLUGIN_FOLDER="${{ github.event.inputs.plugin_folder }}"
-          cp -R "$PLUGIN_FOLDER" "build/$PLUGIN_FOLDER"
-
-      - name: 📦 Create plugin ZIP
-        run: |
-          PLUGIN_FOLDER="${{ github.event.inputs.plugin_folder }}"
-          VERSION="${{ github.event.inputs.version }}"
-          ZIP_NAME="${PLUGIN_FOLDER}-${VERSION}.zip"
-          cd build
-          zip -r "$ZIP_NAME" "$PLUGIN_FOLDER"
+          VERSION="${{ steps.version.outputs.version }}"
+          ZIP_NAME="${{ github.event.inputs.plugin_folder }}-${VERSION}.zip"
+          cd "${{ github.workspace }}"
+          zip -r "build/$ZIP_NAME" "${{ github.event.inputs.plugin_folder }}"
           echo "ZIP_NAME=$ZIP_NAME" >> "$GITHUB_ENV"
 
-      - name: ⬆️ Upload build artifact
+      - name: 📤 Upload ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: xpressbuy247-plugin-${{ github.event.inputs.plugin_folder }}-${{ github.event.inputs.version }}
+          name: xpressbuy247-plugin-${{ env.ZIP_NAME }}
           path: build/${{ env.ZIP_NAME }}
+
+      - name: 🚀 Auto-Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: Release ${{ steps.version.outputs.version }}
+          files: build/${{ env.ZIP_NAME }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
