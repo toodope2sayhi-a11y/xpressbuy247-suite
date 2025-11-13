@@ -2,6 +2,7 @@
 declare(strict_types=1);
 /**
  * XpressBuy247 – Multi-Plugin Builder (PHP 7.4 → 8.3 safe)
+ * Extended with Manifest Embedding (Guardian-Compatible)
  */
 
 $ROOT  = __DIR__ . '/..';
@@ -121,5 +122,46 @@ foreach ($plugins as $p) {
     echo "[{$result}] {$slug} → " . basename($zip) . PHP_EOL;
 }
 
-file_put_contents($BUILD.'/full-suite-manifest.json', json_encode($manifest, JSON_PRETTY_PRINT));
-echo PHP_EOL."=== Build Complete ===".PHP_EOL."Artifacts in: {$BUILD}".PHP_EOL;
+// ------------------------------------------------------------------
+// Embed per-plugin manifest (if present) and finalize suite manifest
+// ------------------------------------------------------------------
+
+$manifestDir = __DIR__ . '/manifests';
+foreach ($manifest['plugins'] as &$plugin) {
+    $slug = $plugin['slug'];
+    $ver  = $plugin['version'];
+    $zip  = "{$BUILD}/{$slug}.zip";
+    $json = "{$manifestDir}/{$slug}.json";
+
+    if (is_file($json) && is_file($zip)) {
+        $data = json_decode(file_get_contents($json), true);
+        if (json_last_error() === JSON_ERROR_NONE) {
+            // Add checksum + build timestamp
+            $data['build_metadata']['checksum'] = hash_file('sha256', $json);
+            $data['build_metadata']['built_at'] = gmdate('c');
+            file_put_contents($json, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+
+            $zipObj = new ZipArchive();
+            if ($zipObj->open($zip) === true) {
+                $zipObj->addFile($json, "{$slug}/manifest.json");
+                $zipObj->close();
+                $plugin['manifest_embedded'] = 'YES';
+                echo "[EMBED] Added manifest.json into {$slug}.zip\n";
+            } else {
+                $plugin['manifest_embedded'] = 'NO';
+                echo "[WARN] Could not reopen {$slug}.zip to embed manifest\n";
+            }
+        } else {
+            echo "[WARN] Invalid JSON manifest for {$slug}\n";
+        }
+    } else {
+        $plugin['manifest_embedded'] = 'NO';
+    }
+}
+unset($plugin);
+
+// Write suite manifest
+$manifest['built_at'] = gmdate('c');
+file_put_contents($BUILD . '/full-suite-manifest.json', json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+
+echo PHP_EOL . "=== Build Complete ===" . PHP_EOL . "Artifacts in: {$BUILD}" . PHP_EOL;
