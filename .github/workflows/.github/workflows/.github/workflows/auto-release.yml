@@ -12,31 +12,40 @@ jobs:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
 
     steps:
-      - name: Checkout repository
+      - name: 🧩 Checkout repository
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GH_CI_TOKEN }}
 
-      - name: Download latest validated ZIPs
+      - name: 📥 Download validated plugin ZIPs
         uses: actions/download-artifact@v4
         with:
           name: xpressbuy247-validated-plugins
           path: build-artifacts
 
-      - name: Skip if no ZIPs
-        run: |
-          shopt -s nullglob
-          files=(build-artifacts/*.zip)
-          if [ ${#files[@]} -eq 0 ]; then
-            echo "No ZIPs to release. Exiting."
-            exit 78
-          fi
+      - name: 📥 Download Guardian summary & logs
+        uses: actions/download-artifact@v4
+        with:
+          name: guardian-final-summary
+          path: guardian-logs
 
-      - name: Compute release tag (run-number)
+      - name: 🧠 Parse Guardian summary for release body
+        id: summary
+        run: |
+          echo "Generating release summary table..."
+          if [ -f guardian-logs/summary.json ]; then
+            plugins=$(jq -r '.results | to_entries[] | "- **\(.key)** → Lint: \(.value.lint) | Namespace: \(.value.namespace) | Sandbox: \(.value.sandbox)"' guardian-logs/summary.json)
+            printf "%s\n" "$plugins" > release-body.md
+          else
+            echo "_No summary.json found._" > release-body.md
+          fi
+          cat release-body.md
+
+      - name: 🧮 Compute release tag
         id: tag
         run: echo "tag=v${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
 
-      - name: Skip if tag already exists
+      - name: 🚫 Skip if tag already exists
         id: check
         env:
           GH_TOKEN: ${{ secrets.GH_CI_TOKEN }}
@@ -47,7 +56,7 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Create GitHub Release
+      - name: 🚀 Create GitHub Release (ZIPs + Logs + Summary)
         if: steps.check.outputs.exists == 'false'
         uses: softprops/action-gh-release@v2
         with:
@@ -60,30 +69,35 @@ jobs:
             **Run:** ${{ github.run_id }}
             **Commit:** ${{ github.sha }}
 
-            ✅ Includes validated plugin ZIPs from Guardian pipeline.
+            ✅ Validated by Guardian + Sandbox Framework  
+            ---
+            **Plugin Validation Summary:**  
+            $(cat release-body.md)
+
+            ---
+            *Logs and summary attached as release assets.*
           draft: false
           prerelease: false
-          files: build-artifacts/*.zip
+          files: |
+            build-artifacts/*.zip
+            guardian-logs/guardian-validation.log
+            guardian-logs/sandbox-validation.log
+            guardian-logs/summary.json
 
-      - name: Post confirmation Issue
+      - name: 📨 Post confirmation Issue
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GH_CI_TOKEN }}
           script: |
             const tag = `${{ steps.tag.outputs.tag }}`;
-            const title = `📦 Auto-Release Published — ${tag}`;
             const url = `https://github.com/${{ github.repository }}/releases/tag/${tag}`;
             const body = `Hello Joel,
 
 A verified build has been published automatically.
 
-**Tag:** ${tag}
+**Tag:** ${tag}  
 **URL:** ${url}
 
-All plugin ZIPs were validated and attached.
+All plugin ZIPs, Guardian logs, and Sandbox summary have been attached.  
 — XpressBuy247 Guardian CI`;
-
-            await github.request('POST /repos/${{ github.repository }}/issues', {
-              title,
-              body
-            });
+            await github.request('POST /repos/${{ github.repository }}/issues', { title: `📦 Auto-Release Published — ${tag}`, body });
