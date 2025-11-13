@@ -1,0 +1,46 @@
+{
+  "plugin_name": "XpressBuy247 Smart Sandbox Installer Pro",
+  "slug": "xpressbuy247-smart-sandbox-installer-pro",
+  "version": "vA.0.0.7",
+  "namespace": "XpressBuy247\\SandboxInstallerPro",
+  "author": "XpressBuy247",
+  "author_uri": "https://xpressbuy247.com",
+  "description": "Enterprise-grade sandbox installer with Guardian validation, REST/CLI verification, safe activation hooks, and Watchdog monitoring.",
+  "dependencies": {
+    "required": [
+      "xpressbuy247-core-framework-pro",
+      "xpressbuy247-guardian-suite-pro"
+    ],
+    "optional": [
+      "xpressbuy247-mu-watchdog-pro"
+    ]
+  },
+  "autoload_map": {
+    "src/Core/Plugin.php": "XpressBuy247\\SandboxInstallerPro\\Core\\Plugin",
+    "src/Core/Validator.php": "XpressBuy247\\SandboxInstallerPro\\Core\\Validator",
+    "src/Core/LogManager.php": "XpressBuy247\\SandboxInstallerPro\\Core\\LogManager"
+  },
+  "activation": {
+    "bootstrap": "\\XpressBuy247\\SandboxInstallerPro\\Core\\Plugin::boot",
+    "safe_mode": true,
+    "rollback_on_error": true,
+    "sandbox_hooks": [
+      "rest_api_init",
+      "admin_bar_menu",
+      "plugin_loaded"
+    ]
+  },
+  "guardian_checks": {
+    "namespace_validation": true,
+    "header_validation": true,
+    "php_lint": true,
+    "sandbox_activation_test": true
+  },
+  "build_metadata": {
+    "last_verified_by": "Guardian CI",
+    "build_pipeline": "XpressBuy247 • Enterprise Build & Validate",
+    "checksum_algorithm": "sha256",
+    "created_at": "2025-11-13T00:00:00Z",
+    "guardian_build_id": "auto"
+  }
+}
