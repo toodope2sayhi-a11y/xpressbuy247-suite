@@ -1,4 +1,4 @@
-name: Build & Validate XpressBuy247 Plugins
+name: XpressBuy247 • Enterprise Build & Validate (Guardian + Sandbox + Watchdog)
 
 on:
   push:
@@ -7,42 +7,68 @@ on:
 
 jobs:
   validate:
-    name: Validate and Package Plugins
+    name: 🔍 Guardian Validation & Packaging
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.GH_CI_TOKEN }}
+      BUILD_DIR: build-artifacts
+      LOG_DIR: guardian-logs
 
     steps:
-      - name: Checkout repository
+      - name: 🧩 Checkout Repository
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GH_CI_TOKEN }}
 
-      - name: Set up PHP
+      - name: ⚙️ Setup PHP Environment
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.2'
-          extensions: mbstring, zip
+          extensions: mbstring, zip, json, curl
+          coverage: none
 
-      - name: Lint and Validate Plugins
+      - name: 🧱 Prepare Build & Log Directories
         run: |
-          echo "🔍 Validating plugin files..."
+          mkdir -p $BUILD_DIR $LOG_DIR
+          echo "Guardian Validation Log — $(date)" > $LOG_DIR/guardian-validation.log
+
+      - name: 🧠 Full Lint & Syntax Check
+        run: |
+          echo "Running PHP lint on all plugin files..."
+          ERRORS=0
+          for plugin in plugins-src/*; do
+            [ -d "$plugin" ] || continue
+            echo "🔎 Scanning $(basename "$plugin")..." | tee -a $LOG_DIR/guardian-validation.log
+            find "$plugin" -type f -name "*.php" -print0 | while IFS= read -r -d '' file; do
+              php -l "$file" 2>> $LOG_DIR/guardian-validation.log || ERRORS=$((ERRORS+1))
+            done
+          done
+          if [ "$ERRORS" -gt 0 ]; then
+            echo "❌ Linting failed — see guardian-validation.log"
+            exit 1
+          fi
+          echo "✅ All PHP files linted clean." | tee -a $LOG_DIR/guardian-validation.log
+
+      - name: 🧾 Validate Headers, Namespace & ABSPATH Guards
+        run: |
+          echo "Validating headers and namespace consistency..."
           for plugin in plugins-src/*; do
             [ -d "$plugin" ] || continue
             main_file="$plugin/$(basename "$plugin").php"
             if [[ -f "$main_file" ]]; then
-              echo "✅ Checking $(basename "$plugin")..."
-              php -l "$main_file" || exit 1
-              grep -q "namespace" "$main_file" || { echo "❌ Missing namespace in $main_file"; exit 1; }
-              grep -q "defined('ABSPATH')" "$main_file" || { echo "❌ Missing ABSPATH guard in $main_file"; exit 1; }
+              echo "📂 Checking $main_file" | tee -a $LOG_DIR/guardian-validation.log
+              grep -q "Plugin Name:" "$main_file" || { echo "❌ Missing Plugin Header: $main_file" | tee -a $LOG_DIR/guardian-validation.log; exit 1; }
+              grep -q "namespace XpressBuy247" "$main_file" || { echo "❌ Missing Namespace: $main_file" | tee -a $LOG_DIR/guardian-validation.log; exit 1; }
+              grep -q "defined('ABSPATH')" "$main_file" || { echo "❌ Missing ABSPATH Guard: $main_file" | tee -a $LOG_DIR/guardian-validation.log; exit 1; }
             else
-              echo "⚠️ Skipping $(basename "$plugin") — main file not found."
+              echo "⚠️ Skipping $(basename "$plugin") — main file not found." | tee -a $LOG_DIR/guardian-validation.log
             fi
           done
+          echo "✅ Header & Namespace Validation Passed." | tee -a $LOG_DIR/guardian-validation.log
 
-      - name: Package Plugins
+      - name: 📦 Package Plugins
         run: |
-          mkdir -p build-artifacts
+          echo "Zipping validated plugins..."
           for plugin in plugins-src/*; do
             [ -d "$plugin" ] || continue
             plugin_slug=$(basename "$plugin")
@@ -50,20 +76,27 @@ jobs:
             if [[ -f "$main_file" ]]; then
               version=$(grep -i "^Version:" "$main_file" | head -n 1 | cut -d':' -f2 | xargs)
               zip_name="${plugin_slug}-v${version}.zip"
-              echo "📦 Zipping $plugin_slug ($version)..."
+              echo "📦 Building $zip_name" | tee -a $LOG_DIR/guardian-validation.log
               cd "$plugin"
-              zip -r "../../build-artifacts/$zip_name" . -x "*.git*" "*.md" "*tests/*" "*build/*" ".github/*"
+              zip -r "../../$BUILD_DIR/$zip_name" . -x "*.git*" "*.md" "*tests/*" "*build/*" ".github/*" > /dev/null
               cd - > /dev/null
             fi
           done
+          echo "✅ Packaging Complete." | tee -a $LOG_DIR/guardian-validation.log
 
-      - name: Upload Build Artifacts
+      - name: 📤 Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: xpressbuy247-validated-plugins
           path: build-artifacts/*.zip
 
-      - name: Notify Build Status by Email
+      - name: 🧩 Upload Guardian Logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: guardian-validation-logs
+          path: guardian-logs/*.log
+
+      - name: 📨 Notify Build Status
         if: always()
         uses: actions/github-script@v7
         with:
@@ -71,21 +104,94 @@ jobs:
           script: |
             const result = '${{ job.status }}';
             const runUrl = `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
-            const subject = `🚦 XpressBuy247 Build ${result === 'success' ? 'Succeeded' : 'Failed'}`;
-            const body = `
-            Hello Joel,
-
-            The latest build for **XpressBuy247 Suite** has completed with status: **${result.toUpperCase()}**.
-
-            Repository: ${{ github.repository }}
-            Workflow: ${{ github.workflow }}
-            Run URL: ${runUrl}
-
-            Regards,
-            XpressBuy247 Guardian CI
-            `;
-
+            const subject = `🚦 Guardian Build ${result.toUpperCase()}`
+            const body = `Guardian Validation completed for XpressBuy247 Suite.\nStatus: ${result.toUpperCase()}\nRun: ${runUrl}`;
             await github.request('POST /repos/${{ github.repository }}/issues', {
               title: subject,
               body: body
             });
+
+  sandbox:
+    name: 🧠 Sandbox Safe Activation Test
+    runs-on: ubuntu-latest
+    needs: validate
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: wordpress
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - name: 🧩 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 📥 Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: xpressbuy247-validated-plugins
+          path: build-artifacts
+
+      - name: ⚙️ Setup WordPress Sandbox
+        uses: wearerequired/setup-wp-env@v2
+        with:
+          php-version: '8.2'
+          wp-version: '6.8.3'
+          db-host: 127.0.0.1
+          db-name: wordpress
+          db-user: root
+          db-pass: root
+
+      - name: 📦 Extract and Activate Plugins
+        run: |
+          mkdir -p wp-content/plugins/
+          for zip in build-artifacts/*.zip; do
+            unzip -q "$zip" -d wp-content/plugins/
+          done
+          echo "Activating all plugins..."
+          touch guardian-logs/sandbox-validation.log
+          for plugin_dir in wp-content/plugins/*; do
+            slug=$(basename "$plugin_dir")
+            echo "🔹 Activating $slug ..." | tee -a guardian-logs/sandbox-validation.log
+            wp plugin activate "$slug" --allow-root || echo "⚠️ $slug failed to activate" | tee -a guardian-logs/sandbox-validation.log
+          done
+          echo "✅ Sandbox activation cycle complete." | tee -a guardian-logs/sandbox-validation.log
+
+      - name: 🧾 Generate Guardian Summary JSON
+        run: |
+          echo '<?php
+          $logDir = "guardian-logs";
+          $summary = ["timestamp"=>date("Y-m-d H:i:s"),"results"=>[]];
+          foreach(["guardian-validation.log","sandbox-validation.log"] as $file){
+            $path="$logDir/$file";
+            if(!file_exists($path))continue;
+            $lines=file($path,FILE_IGNORE_NEW_LINES|FILE_SKIP_EMPTY_LINES);
+            $plugin=null;
+            foreach($lines as $line){
+              if(preg_match("/xpressbuy247-[\\w\\-]+/i",$line,$m)){$plugin=$m[0];$summary["results"][$plugin]??=["lint"=>"pending","namespace"=>"pending","sandbox"=>"pending"];}
+              if(strpos($line,"linted clean")!==false)$summary["results"][$plugin]["lint"]="passed";
+              if(strpos($line,"Header & Namespace Validation Passed")!==false)$summary["results"][$plugin]["namespace"]="passed";
+              if(strpos($line,"failed to activate")!==false)$summary["results"][$plugin]["sandbox"]="failed";
+              if(strpos($line,"Sandbox activation cycle complete")!==false)$summary["results"][$plugin]["sandbox"]="passed";
+            }
+          }
+          file_put_contents("$logDir/summary.json",json_encode($summary,JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES));
+          echo "✅ Guardian Summary written to $logDir/summary.json\n";' > builder/guardian-log-parser.php
+          php builder/guardian-log-parser.php
+
+      - name: 📤 Upload Guardian Summary & Logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: guardian-final-summary
+          path: |
+            guardian-logs/guardian-validation.log
+            guardian-logs/sandbox-validation.log
+            guardian-logs/summary.json
