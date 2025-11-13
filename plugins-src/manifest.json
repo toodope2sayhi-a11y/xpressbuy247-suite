@@ -1,0 +1,24 @@
+{
+  "plugin_name": "XpressBuy247 Ultra Sandbox Pro",
+  "slug": "xpressbuy247-ultra-sandbox-pro",
+  "version": "vA.0.1.0",
+  "namespace": "XpressBuy247\\UltraSandboxPro",
+  "author": "XpressBuy247",
+  "author_uri": "https://xpressbuy247.com",
+  "description": "Enterprise-grade sandbox with Guardian validation, REST/CLI endpoints, rate-limited safe activation, admin bar tools, logs viewer, and 30-day rolling cleanup.",
+  "dependencies": {
+    "required": [
+      "xpressbuy247-core-framework-pro",
+      "xpressbuy247-guardian-suite-pro"
+    ],
+    "optional": [
+      "xpressbuy247-mu-watchdog-pro"
+    ]
+  },
+  "guardian_checks": {
+    "namespace_validation": true,
+    "header_validation": true,
+    "php_lint": true,
+    "sandbox_activation_test": true
+  }
+}
