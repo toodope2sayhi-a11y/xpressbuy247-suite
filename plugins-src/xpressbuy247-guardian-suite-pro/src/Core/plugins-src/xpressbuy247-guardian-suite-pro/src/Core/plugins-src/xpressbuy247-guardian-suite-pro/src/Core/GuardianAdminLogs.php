@@ -1,7 +1,7 @@
 <?php
 /**
  * XpressBuy247 Guardian Suite Pro – Admin Log Viewer
- * Displays daily Guardian logs in WordPress Admin.
+ * Displays daily Guardian logs in WordPress Admin with download option.
  */
 
 namespace XpressBuy247\GuardianSuitePro\Core;
@@ -16,6 +16,7 @@ class GuardianAdminLogs
     public static function init(): void
     {
         add_action('admin_menu', [__CLASS__, 'register_menu']);
+        add_action('admin_post_guardian_download_log', [__CLASS__, 'download_log']);
     }
 
     public static function register_menu(): void
@@ -46,11 +47,11 @@ class GuardianAdminLogs
     public static function render_dashboard(): void
     {
         echo '<div class="wrap"><h1>🛡️ XpressBuy247 Guardian Suite Pro</h1>';
-        echo '<p>Welcome to the Guardian Suite Dashboard. Use the Logs tab to view validation reports.</p></div>';
+        echo '<p>Welcome to the Guardian Suite Dashboard. Use the Logs tab to view and download validation reports.</p></div>';
     }
 
     /**
-     * Display logs
+     * Display logs and download option
      */
     public static function render_logs(): void
     {
@@ -86,6 +87,15 @@ class GuardianAdminLogs
         $selectedFile = $_GET['file'] ?? basename($files[0]);
         $filePath = $log_dir . '/' . sanitize_file_name($selectedFile);
 
+        // Download button
+        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
+        echo '<input type="hidden" name="action" value="guardian_download_log">';
+        echo '<input type="hidden" name="file" value="' . esc_attr($selectedFile) . '">';
+        wp_nonce_field('guardian_download_log', '_wpnonce_guardian_log');
+        echo '<p><button type="submit" class="button button-primary">⬇️ Download This Log</button></p>';
+        echo '</form><hr>';
+
+        // Display the file content
         if (file_exists($filePath)) {
             $content = file_get_contents($filePath);
             echo '<div style="background:#111;color:#0f0;padding:10px;border-radius:8px;max-height:500px;overflow:auto;font-family:monospace;">';
@@ -97,9 +107,40 @@ class GuardianAdminLogs
 
         echo '</div>';
     }
+
+    /**
+     * Handle log file download
+     */
+    public static function download_log(): void
+    {
+        if (!current_user_can('manage_options')) {
+            wp_die('Permission denied.');
+        }
+
+        check_admin_referer('guardian_download_log', '_wpnonce_guardian_log');
+
+        $file = sanitize_file_name($_POST['file'] ?? '');
+        if (!$file) {
+            wp_die('Invalid file.');
+        }
+
+        $upload_dir = wp_upload_dir();
+        $filePath = $upload_dir['basedir'] . '/guardian/logs/' . $file;
+
+        if (!file_exists($filePath)) {
+            wp_die('File not found.');
+        }
+
+        header('Content-Description: File Transfer');
+        header('Content-Type: text/plain');
+        header('Content-Disposition: attachment; filename="' . basename($filePath) . '"');
+        header('Content-Length: ' . filesize($filePath));
+        readfile($filePath);
+        exit;
+    }
 }
 
-// Initialize the admin menu on plugin load
+// Initialize admin features
 add_action('plugins_loaded', function () {
     if (is_admin()) {
         \XpressBuy247\GuardianSuitePro\Core\GuardianAdminLogs::init();
