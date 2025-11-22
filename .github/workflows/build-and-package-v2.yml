@@ -13,22 +13,32 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up PHP
+      - name: Set up PHP with ZIP extension
         uses: shivammathur/setup-php@v2
         with:
           php-version: 8.2
+          extensions: zip
 
-      - name: Run Builder
+      - name: Show repository structure
+        run: |
+          echo "ROOT CONTENTS:"
+          ls -la
+          echo "plugins-src CONTENTS:"
+          ls -la plugins-src || echo "plugins-src folder missing"
+
+      - name: Run Plugin Builder
         run: php builder/build.php
 
-      - name: Verify all ZIPs created
+      - name: Show build folder after builder
         run: |
-          echo "Searching for ZIP files..."
-          find . -name "*.zip" -type f -exec ls -lh {} \;
+          echo "BUILD FOLDER CONTENT:"
+          ls -la build || echo "Build folder not created"
 
-      - name: Upload ALL built plugins (guaranteed)
+      - name: List all ZIPs found
+        run: find . -name "*.zip" -type f -exec ls -lh {} \;
+
+      - name: Upload built plugins
         uses: actions/upload-artifact@v4
         with:
-          name: xpressbuy247-latest-build
-          path: |
-            **/*.zip
+          name: xpressbuy247-latest-suite
+          path: build/*.zip
