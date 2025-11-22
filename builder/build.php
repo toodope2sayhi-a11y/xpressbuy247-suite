@@ -1,40 +1,40 @@
-name: Build and Package XpressBuy247 (Core 4 – v2)
+<?php
 
-on:
-  push:
-    branches: [ "main" ]
-  workflow_dispatch:
+$sourceDir = __DIR__ . '/../plugins-src';
+$buildDir  = __DIR__ . '/../build';
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
+if (!is_dir($buildDir)) {
+    mkdir($buildDir, 0777, true);
+}
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+$plugins = array_diff(scandir($sourceDir), ['.', '..']);
 
-      - name: Set up PHP with ZIP extension
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: 8.2
-          extensions: zip
+foreach ($plugins as $plugin) {
+    $pluginPath = $sourceDir . '/' . $plugin;
 
-      - name: Confirm ZIP extension enabled
-        run: php -m | grep zip || (echo "ZIP extension missing" && exit 1)
+    if (!is_dir($pluginPath)) {
+        continue;
+    }
 
-      - name: Run Plugin Builder
-        run: php builder/build.php
+    $zipFile = $buildDir . '/' . $plugin . '.zip';
 
-      - name: Verify build directory
-        run: |
-          echo "Contents of build folder:"
-          ls -lah build || echo "No build directory found"
+    $zip = new ZipArchive();
+    if ($zip->open($zipFile, ZipArchive::CREATE | ZipArchive::OVERWRITE) === TRUE) {
 
-      - name: List all ZIPs found
-        run: find . -name "*.zip" -type f -exec ls -lh {} \;
+        $files = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($pluginPath, RecursiveDirectoryIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::LEAVES_ONLY
+        );
 
-      - name: Upload all built plugins
-        uses: actions/upload-artifact@v4
-        with:
-          name: xpressbuy247-latest-suite
-          path: build/*.zip
+        foreach ($files as $file) {
+            $filePath = $file->getRealPath();
+            $relativePath = $plugin . '/' . substr($filePath, strlen($pluginPath) + 1);
+            $zip->addFile($filePath, $relativePath);
+        }
+
+        $zip->close();
+        echo "Created ZIP: $zipFile\n";
+    }
+}
+
+echo "Build complete.\n";
