@@ -1,56 +1,12 @@
-name: Build and Package XpressBuy247 (Core 4 – v2)
+- name: Debug full build tree
+  run: |
+    echo "==== FULL BUILD STRUCTURE ===="
+    find build -type f || echo "No files in build directory"
 
-on:
-  push:
-    branches: [ "main" ]
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up PHP with ZIP extension
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: 8.2
-          extensions: zip
-
-      - name: TEST zip extension
-        run: |
-          php -m | grep -i zip || echo "ZIP EXTENSION NOT LOADED"
-
-      - name: Show project root
-        run: |
-          echo "=== ROOT FOLDER ==="
-          ls -lah
-
-      - name: Show plugins-src
-        run: |
-          echo "=== plugins-src CONTENT ==="
-          ls -R plugins-src
-
-      - name: Run Builder WITH LOGGING
-        run: |
-          echo "=== RUNNING BUILDER ==="
-          php builder/build.php
-          echo "=== BUILDER FINISHED ==="
-
-      - name: Show build folder after builder
-        run: |
-          echo "=== BUILD FOLDER CONTENT ==="
-          ls -lah build || echo "NO BUILD FOLDER FOUND"
-
-      - name: List all zip files anywhere
-        run: |
-          echo "=== SEARCHING FOR ZIP FILES ==="
-          find . -name "*.zip" -type f -exec ls -lh {} \;
-
-      - name: Upload plugins
-        uses: actions/upload-artifact@v4
-        with:
-          name: xpressbuy247-suite
-          path: build/*.zip
+- name: Upload all build output (force capture)
+  uses: actions/upload-artifact@v4
+  with:
+    name: xpressbuy247-suite
+    path: |
+      build
+      build/**/*.zip
