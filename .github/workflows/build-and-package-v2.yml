@@ -1,12 +1,37 @@
-- name: Debug full build tree
-  run: |
-    echo "==== FULL BUILD STRUCTURE ===="
-    find build -type f || echo "No files in build directory"
+name: Build and Package XpressBuy247 (Core 4 – FIXED)
 
-- name: Upload all build output (force capture)
-  uses: actions/upload-artifact@v4
-  with:
-    name: xpressbuy247-suite
-    path: |
-      build
-      build/**/*.zip
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup PHP + ZIP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: 8.2
+          extensions: zip
+
+      - name: Confirm ZIP extension
+        run: php -m | grep -i zip
+
+      - name: Run Plugin Builder
+        run: php builder/build.php
+
+      - name: Verify build output
+        run: |
+          echo "=== BUILD FOLDER ==="
+          ls -lah build || echo "NO BUILD FOLDER"
+
+      - name: Upload ALL generated zip files
+        uses: actions/upload-artifact@v4
+        with:
+          name: xpressbuy247-suite-artifacts
+          path: build/
