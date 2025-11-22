@@ -6,32 +6,54 @@ on:
       - "Auto-Release XpressBuy247 Plugins"
     types: [completed]
 
+permissions:
+  contents: write
+  issues: write
+
 jobs:
   rollback:
     name: Verify Release & Rollback if Needed
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GH_CI_TOKEN }}
+
+      - name: Setup GitHub CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install gh -y
+
+      - name: Authenticate GitHub CLI
+        env:
+          GH_TOKEN: ${{ secrets.GH_CI_TOKEN }}
+        run: |
+          gh auth setup-git
 
       - name: Verify release status
         id: check
+        env:
+          GH_TOKEN: $${{ secrets.GH_CI_TOKEN }}
         run: |
           echo "🔍 Checking last release..."
-          tag=$(gh release list --limit 1 --json tagName --jq '.[0].tagName' || echo "")
-          if [ -z "$tag" ]; then
-            echo "No previous release found — skipping rollback."
-            echo "rollback=false" >> "$GITHUB_OUTPUT"
+
+          LAST_TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName' || true)
+
+          if [ -z "$LAST_TAG" ]; then
+            echo "No previous release found. Skipping rollback."
+            echo "rollback=false" >> $GITHUB_OUTPUT
             exit 0
           fi
+
+          echo "Latest release: $LAST_TAG"
+          echo "Workflow conclusion: ${{ github.event.workflow_run.conclusion }}"
+
           if [ "${{ github.event.workflow_run.conclusion }}" != "success" ]; then
-            echo "❌ Release failed — rollback triggered."
-            echo "rollback=true" >> "$GITHUB_OUTPUT"
+            echo "❌ Release failed. Triggering rollback."
+            echo "rollback=true" >> $GITHUB_OUTPUT
           else
             echo "✅ Release healthy."
-            echo "rollback=false" >> "$GITHUB_OUTPUT"
+            echo "rollback=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Execute rollback
@@ -40,43 +62,24 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_CI_TOKEN }}
         run: |
           echo "🚨 Rolling back to last stable release..."
-          last_tag=$(gh release list --limit 1 --json tagName --jq '.[0].tagName')
-          echo "Re-publishing $last_tag"
-          gh release edit "$last_tag" --prerelease=false --draft=false
-          echo "Rollback completed for $last_tag."
-
-      - name: Log result to Guardian Reports
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GH_CI_TOKEN }}
-          script: |
-            const result = "${{ steps.check.outputs.rollback }}";
-            const status = result === "true" ? "⚠️ Rollback Executed" : "✅ Stable Release Verified";
-            const body = `
-### Guardian Rollback Report
-- Workflow: ${context.workflow}
-- Result: ${status}
-- Time: ${new Date().toISOString()}
-- Commit: ${context.payload.workflow_run.head_sha}
-- Triggered by: ${context.actor}
-`;
-            await github.request('POST /repos/${{ github.repository }}/issues', {
-              title: `${status} — ${context.workflow}`,
-              body
-            });
+          LAST_TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName')
+          gh release edit "$LAST_TAG" --prerelease=false --draft=false
+          echo "Rollback completed for $LAST_TAG."
 
   sync-logs:
     name: Sync Guardian Logs Artifact
     needs: rollback
     runs-on: ubuntu-latest
+
     steps:
-      - name: Create log summary
+      - name: Generate log summary
         run: |
           mkdir -p guardian-logs
-          echo "Guardian Log Summary — $(date)" > guardian-logs/summary.txt
+          echo "Guardian Log Summary" > guardian-logs/summary.txt
+          echo "Date: $(date)" >> guardian-logs/summary.txt
           echo "Workflow: ${{ github.workflow }}" >> guardian-logs/summary.txt
-          echo "Run ID: ${{ github.run_id }}" >> guardian-logs/summary.txt
-          echo "Result: ${{ github.event.workflow_run.conclusion }}" >> guardian-logs/summary.txt
+          echo "Conclusion: ${{ github.event.workflow_run.conclusion }}" >> guardian-logs/summary.txt
+          echo "Commit: ${{ github.event.workflow_run.head_sha }}" >> guardian-logs/summary.txt
 
       - name: Upload Guardian Logs
         uses: actions/upload-artifact@v4
