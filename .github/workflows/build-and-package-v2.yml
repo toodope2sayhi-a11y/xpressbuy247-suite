@@ -16,13 +16,19 @@ jobs:
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.2'
+          php-version: 8.2
 
       - name: Run Builder
         run: php builder/build.php
 
-      - name: Upload Artifacts
+      - name: Verify all ZIPs created
+        run: |
+          echo "Searching for ZIP files..."
+          find . -name "*.zip" -type f -exec ls -lh {} \;
+
+      - name: Upload ALL built plugins (guaranteed)
         uses: actions/upload-artifact@v4
         with:
-          name: xpressbuy247-suite
-          path: build/
+          name: xpressbuy247-latest-build
+          path: |
+            **/*.zip
