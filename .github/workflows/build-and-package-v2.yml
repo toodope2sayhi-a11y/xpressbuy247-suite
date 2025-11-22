@@ -1,8 +1,8 @@
-name: Build and Package XpressBuy247 (FORCED ARTIFACT)
+name: Build and Package XpressBuy247 (Core 4 – v2)
 
 on:
   push:
-    branches: ["main"]
+    branches: [ "main" ]
   workflow_dispatch:
 
 jobs:
@@ -13,33 +13,27 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup PHP + ZIP
+      - name: Set up PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: 8.2
           extensions: zip
 
-      - name: Ensure build folder exists
-        run: mkdir -p build
-
       - name: Run Plugin Builder
         run: php builder/build.php
 
-      - name: Show actual ZIP output
-        run: |
-          echo "=== ALL ZIP FILES FOUND ==="
-          find . -name "*.zip" -type f || true
+      - name: Ensure build folder exists
+        run: mkdir -p build
 
-      - name: Force move ZIPs into build folder
+      - name: Move all ZIPs into build folder
         run: |
-          find . -name "*.zip" -type f -exec cp {} build/ \;
+          find . -maxdepth 2 -name "*.zip" -exec mv {} build/ \;
 
-      - name: Show build folder after copy
+      - name: Verify build folder
         run: ls -lah build
 
-      - name: Upload Artifacts (FORCED)
+      - name: Upload plugins as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: xpressbuy247-plugins
-          path: build/
-          if-no-files-found: error
+          name: xpressbuy247-suite
+          path: build/*.zip
